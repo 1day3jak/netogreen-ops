@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="card">
+  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+    <span class="card-title" style="margin:0;">전체 공급 현황</span>
+    <div style="display:flex; gap:8px; align-items:center;">
+      <select onchange="location.href='/overview'+(this.value?'?farm_id='+this.value:'')"
+              style="padding:6px 10px; border-radius:6px; border:0.5px solid #ddd; font-size:13px;">
+        <option value="">전체 농장</option>
+        {% for farm in farms %}
+        <option value="{{ farm.farm_id }}"
+          {% if selected_farm_id == farm.farm_id %}selected{% endif %}>
+          {{ farm.farm_name }}
+        </option>
+        {% endfor %}
+      </select>
+      <a href="/seeding" class="btn btn-primary">+ 파종계획 입력</a>
+    </div>
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th>농장</th>
+        <th>차수</th>
+        <th>파종 예정일</th>
+        <th>정식 예정일</th>
+        <th>수확 예정일</th>
+        <th>잔여일수</th>
+        <th>작목 구성</th>
+        <th>예상 수확량</th>
+        <th>상태</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for batch in batches %}
+      <tr>
+        <td>{{ batch.farm.farm_name }}</td>
+        <td>{{ batch.batch_no }}차</td>
+        <td>{{ batch.plan_seeding_at }}</td>
+        <td>{{ batch.plan_transplant_at }}</td>
+        <td>{{ batch.plan_harvest_at }}</td>
+        <td>
+          {% if batch.days_to_harvest is not none %}
+            {% if batch.days_to_harvest <= 3 %}
+              <span class="urgent">D-{{ batch.days_to_harvest }}</span>
+            {% elif batch.days_to_harvest < 0 %}
+              <span style="color:#999;">완료</span>
+            {% else %}
+              D-{{ batch.days_to_harvest }}
+            {% endif %}
+          {% endif %}
+        </td>
+        <td>
+          {% for cycle in batch.cycles %}
+            <span style="font-size:11px; background:#f0f0f0;
+                         padding:2px 6px; border-radius:4px; margin:1px;">
+              {{ cycle.crop_name }}
+            </span>
+          {% endfor %}
+        </td>
+        <td>
+          {% set total_kg = [] %}
+          {% for cycle in batch.cycles %}
+            {% if cycle.expected_harvest_kg %}
+              {% set _ = total_kg.append(cycle.expected_harvest_kg) %}
+            {% endif %}
+          {% endfor %}
+          {% if total_kg %}
+            {{ total_kg | sum | round(1) }}kg
+          {% endif %}
+        </td>
+        <td>
+          <span class="badge badge-{{ batch.status }}">
+            {% if batch.status == 'planned' %}계획
+            {% elif batch.status == 'seeded' %}파종완료
+            {% elif batch.status == 'transplanted' %}정식완료
+            {% elif batch.status == 'harvesting' %}수확중
+            {% elif batch.status == 'done' %}완료
+            {% endif %}
+          </span>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  {% if not batches %}
+  <p style="text-align:center; color:#999; padding:40px 0;">
+    등록된 파종 계획이 없습니다.
+  </p>
+  {% endif %}
+</div>
+
+{% endblock %}

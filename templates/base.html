@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>네토그린 운영</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, sans-serif; font-size: 14px;
+           color: #1a1a1a; background: #f8f8f7; }
+    nav { background: #2C5F2D; color: white; padding: 12px 24px;
+          display: flex; gap: 24px; align-items: center; }
+    nav a { color: white; text-decoration: none; font-size: 14px; opacity: 0.85; }
+    nav a:hover { opacity: 1; }
+    nav .brand { font-weight: 600; font-size: 15px; opacity: 1; margin-right: 12px; }
+    main { max-width: 1200px; margin: 0 auto; padding: 32px 24px; }
+    .card { background: white; border-radius: 10px;
+            border: 0.5px solid #e0e0e0; padding: 24px; margin-bottom: 20px; }
+    .card-title { font-size: 15px; font-weight: 600; margin-bottom: 16px; }
+    .btn { padding: 8px 18px; border-radius: 6px; border: none;
+           cursor: pointer; font-size: 13px; font-weight: 500; }
+    .btn-primary { background: #2C5F2D; color: white; }
+    .btn-primary:hover { background: #1e4a1f; }
+    .btn-secondary { background: white; color: #444;
+                     border: 0.5px solid #ddd; }
+    table { width: 100%; border-collapse: collapse; }
+    th { text-align: left; font-size: 12px; color: #666;
+         border-bottom: 1px solid #eee; padding: 8px 10px; }
+    td { padding: 10px; border-bottom: 0.5px solid #f0f0f0; font-size: 13px; }
+    tr:hover td { background: #fafafa; }
+    .badge { font-size: 11px; padding: 2px 8px; border-radius: 10px; }
+    .badge-planned     { background: #f0f0f0; color: #666; }
+    .badge-seeded      { background: #e8f5e9; color: #2C5F2D; }
+    .badge-transplanted{ background: #e3f2fd; color: #1565c0; }
+    .badge-harvesting  { background: #fff8e1; color: #856404; }
+    .badge-done        { background: #eeeeee; color: #999; }
+    .urgent { color: #c0392b; font-weight: 600; }
+    .form-group { margin-bottom: 16px; }
+    .form-group label { display: block; font-size: 12px;
+                        color: #666; margin-bottom: 6px; }
+    .form-group input, .form-group select {
+      width: 100%; padding: 8px 10px; border-radius: 6px;
+      border: 0.5px solid #ddd; font-size: 13px; }
+    .form-group input:focus, .form-group select:focus {
+      outline: none; border-color: #2C5F2D; }
+  </style>
+</head>
+<body>
+  <nav>
+    <span class="brand">NETO GREEN</span>
+    <a href="/overview">공급현황</a>
+    <a href="/seeding">파종계획 입력</a>
+  </nav>
+  <main>
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

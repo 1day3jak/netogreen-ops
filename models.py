@@ -20,6 +20,7 @@ class CropSpec(Base):
     growing_days      = Column(Integer, nullable=False)      # 재배기간
     expected_weight_g = Column(Integer)                      # 예상중량(g)
     seeding_ratio     = Column(Float, nullable=False, default=1.2)  # 파종비율
+    sort_order        = Column(Integer, default=999)    # 정렬순서 (낮을수록 앞)
     created_at        = Column(String(30), default="datetime('now')")
 
     # 이 spec을 참조하는 재배라인들
@@ -275,9 +276,8 @@ class FarmCropSpec(Base):
     seedling_days     = Column(Integer)
     growing_days      = Column(Integer)
     expected_weight_g = Column(Integer)
-    seeding_ratio     = Column(Float)
-    reason            = Column(Text)
-    created_at        = Column(String(30))
+    seeding_ratio     = Column(Float, nullable=False, default=1.2)
+    created_at        = Column(String(30), default="datetime('now')")
 
     __table_args__ = (UniqueConstraint("farm_id", "crop_name", "seed_name", "valid_from"),)
 

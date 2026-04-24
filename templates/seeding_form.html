@@ -1,0 +1,347 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="card">
+  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+    <span class="card-title" style="margin:0;">파종계획 입력 / 수정</span>
+    <div style="display:flex; gap:8px; align-items:center;">
+
+      <select id="farm-select"
+              style="padding:7px 12px; border-radius:6px; border:0.5px solid #ddd; font-size:13px;">
+        <option value="">농장 선택</option>
+        {% for farm in farms %}
+        <option value="{{ farm.farm_id }}"
+                data-transplant-wd="{{ farm.transplant_weekday }}"
+                data-harvest-wd="{{ farm.harvest_weekday }}"
+                data-box-unit="{{ farm.seedling_box_unit }}">
+          {{ farm.farm_name }}
+        </option>
+        {% endfor %}
+      </select>
+
+      <!-- 조회 조건 -->
+      <div style="display:flex; gap:4px; background:#f0f0f0;
+                  border-radius:6px; padding:3px;">
+        <button id="btn-current" onclick="setMode('current')"
+                style="padding:5px 12px; border-radius:4px; border:none;
+                       font-size:12px; cursor:pointer;
+                       background:#2C5F2D; color:white;">현재만</button>
+        <button id="btn-all" onclick="setMode('all')"
+                style="padding:5px 12px; border-radius:4px; border:none;
+                       font-size:12px; cursor:pointer;
+                       background:transparent; color:#666;">전체</button>
+      </div>
+
+      <button onclick="addRows(5)" class="btn btn-secondary" style="font-size:12px;">+ 5행 추가</button>
+      <button onclick="saveAll()" class="btn btn-primary">저장</button>
+    </div>
+  </div>
+
+  <div id="grid"></div>
+  <div id="save-status" style="margin-top:12px; font-size:13px; color:#666;"></div>
+</div>
+
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/handsontable@14/dist/handsontable.full.min.css">
+<script src="https://cdn.jsdelivr.net/npm/handsontable@14/dist/handsontable.full.min.js"></script>
+
+<script>
+const CROP_SPECS     = {{ crop_specs | tojson }};
+const PORTS_PER_UNIT = 256;
+const PORTS_PER_BOX  = 176;
+const cropNames      = [...new Set(CROP_SPECS.map(s => s.crop_name))];
+
+// cycle_id 보관 (행 인덱스 → cycle_id)
+let cycleIdMap = {};
+let currentMode = 'current';
+let changedRows = new Set();  // 변경된 행 인덱스 추적
+
+// col index:
+// 0:차수 1:작목명 2:종자명 3:unit 4:파종예정일
+// 5:정식수량 6:파종수량 7:삽목상자
+// 8:육묘기간 9:정식예정일 10:재배기간 11:수확예정일
+// 12:파종알림 13:정식알림 14:수확알림
+
+function getSpec(cropName) {
+  return CROP_SPECS.find(s => s.crop_name === cropName) || null;
+}
+function getFarmOpts() {
+  const el  = document.getElementById('farm-select');
+  const opt = el.options[el.selectedIndex];
+  return {
+    transplantWd: parseInt(opt?.dataset?.transplantWd ?? 0),
+    harvestWd:    parseInt(opt?.dataset?.harvestWd    ?? 2),
+    boxUnit:      parseInt(opt?.dataset?.boxUnit      ?? 0),
+  };
+}
+function farmSelected() {
+  return document.getElementById('farm-select').value !== '';
+}
+function addDays(dateStr, days) {
+  if (!dateStr) return '';
+  const d = new Date(dateStr);
+  if (isNaN(d)) return '';
+  d.setDate(d.getDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+function adjustToWeekday(dateStr, targetWd) {
+  if (!dateStr) return '';
+  const d = new Date(dateStr);
+  if (isNaN(d)) return '';
+  const jsWd  = d.getDay();
+  const ourWd = jsWd === 0 ? 6 : jsWd - 1;
+  const diff  = (ourWd - targetWd + 7) % 7;
+  d.setDate(d.getDate() - diff);
+  return d.toISOString().slice(0, 10);
+}
+
+function calcRow(row, changedCol) {
+  const newRow      = [...row];
+  const cropName    = row[1];
+  const unitAlloc   = parseFloat(row[3]);
+  const seedingDate = String(row[4] || '');
+  const spec        = getSpec(cropName);
+
+  if (changedCol === 1) {
+    if (spec) {
+      newRow[2]  = spec.seed_name;
+      newRow[8]  = spec.seedling_days;
+      newRow[10] = spec.growing_days;
+    }
+    [5, 6, 7, 9, 11].forEach(c => newRow[c] = '');
+  }
+
+  if (!spec) return newRow;
+
+  if ((changedCol === 1 || changedCol === 3) && unitAlloc) {
+    const { boxUnit } = getFarmOpts();
+    const transplantQty = Math.floor(unitAlloc * PORTS_PER_UNIT);
+    const rawSeeding    = Math.ceil(transplantQty * spec.seeding_ratio);
+    let seedingQty, seedlingBoxes;
+    if (boxUnit) {
+      seedlingBoxes = Math.ceil(rawSeeding / PORTS_PER_BOX);
+      seedingQty    = seedlingBoxes * PORTS_PER_BOX;
+    } else {
+      seedingQty    = rawSeeding;
+      seedlingBoxes = Math.ceil(seedingQty / PORTS_PER_BOX);
+    }
+    newRow[5] = transplantQty;
+    newRow[6] = seedingQty;
+    newRow[7] = seedlingBoxes;
+  }
+
+  if ((changedCol === 1 || changedCol === 4) && seedingDate) {
+    const { transplantWd, harvestWd } = getFarmOpts();
+    const seedlingDays  = newRow[8]  || spec.seedling_days;
+    const growingDays   = newRow[10] || spec.growing_days;
+    const rawTransplant = addDays(seedingDate, seedlingDays);
+    const transplantDate = adjustToWeekday(rawTransplant, transplantWd);
+    const rawHarvest    = addDays(transplantDate, growingDays);
+    const harvestDate   = adjustToWeekday(rawHarvest, harvestWd);
+    newRow[9]  = transplantDate;
+    newRow[11] = harvestDate;
+  }
+
+  return newRow;
+}
+
+function emptyRow() {
+  return ['', '', '', '', '', '', '', '', '', '', '', '', '', '', ''];
+}
+
+function rowToArray(r) {
+  return [
+    r.batch_no, r.crop_name, r.seed_name, r.unit_alloc, r.seeding_date,
+    r.transplant_qty, r.seeding_qty, r.seedling_boxes,
+    r.seedling_days, r.transplant_date, r.growing_days, r.harvest_date,
+    r.seeding_notice, r.transplant_notice, r.harvest_notice,
+  ];
+}
+
+// ── 조회 모드 전환 ─────────────────────────
+function setMode(mode) {
+  currentMode = mode;
+  document.getElementById('btn-current').style.background =
+    mode === 'current' ? '#2C5F2D' : 'transparent';
+  document.getElementById('btn-current').style.color =
+    mode === 'current' ? 'white' : '#666';
+  document.getElementById('btn-all').style.background =
+    mode === 'all' ? '#2C5F2D' : 'transparent';
+  document.getElementById('btn-all').style.color =
+    mode === 'all' ? 'white' : '#666';
+
+  const farmId = document.getElementById('farm-select').value;
+  if (farmId) loadData(farmId, mode);
+}
+
+// ── 데이터 로드 ───────────────────────────
+async function loadData(farmId, mode) {
+  const res  = await fetch(`/seeding/load?farm_id=${farmId}&mode=${mode}`);
+  const data = await res.json();
+
+  cycleIdMap = {};
+  changedRows = new Set();  // 로드 시 초기화
+
+  const rows = data.rows.map((r, i) => {
+    cycleIdMap[i] = r.cycle_id;  // 행 인덱스 → cycle_id 매핑
+    return rowToArray(r);
+  });
+
+  // 빈 행 5개 추가 (신규 입력용)
+  for (let i = 0; i < 5; i++) rows.push(emptyRow());
+
+  hot.loadData(rows);
+  document.getElementById('save-status').textContent =
+    `${data.rows.length}건 불러옴`;
+}
+
+// ── Handsontable 초기화 ───────────────────
+const hot = new Handsontable(document.getElementById('grid'), {
+  data: Array.from({ length: 20 }, emptyRow),
+  rowHeaders:  true,
+  colHeaders:  [
+    '차수', '작목명', '종자명', 'unit', '파종예정일',
+    '정식수량', '파종수량', '삽목상자',
+    '육묘기간', '정식예정일', '재배기간', '수확예정일',
+    '파종알림', '정식알림', '수확알림'
+  ],
+  columns: [
+    { type: 'numeric' },
+    { type: 'dropdown', source: cropNames },
+    {},
+    { type: 'numeric' },
+    { type: 'date', dateFormat: 'YYYY-MM-DD', correctFormat: true },
+    { type: 'numeric' },
+    { type: 'numeric' },
+    { type: 'numeric' },
+    { type: 'numeric' },
+    { type: 'date', dateFormat: 'YYYY-MM-DD', correctFormat: true },
+    { type: 'numeric' },
+    { type: 'date', dateFormat: 'YYYY-MM-DD', correctFormat: true },
+    {},
+    {},
+    {},
+  ],
+  cells(row, col) {
+    if ([2, 5, 6, 7, 8, 10].includes(col)) {
+      return { className: 'auto-cell' };
+    }
+    if ([12, 13, 14].includes(col)) {
+      return { className: 'notice-cell' };
+    }
+    // 불러온 행 (cycle_id 있는 행) 배경 구분
+    if (cycleIdMap[row] !== undefined) {
+      return { className: 'loaded-row' };
+    }
+    return {};
+  },
+  beforeChange(changes) {
+    if (!farmSelected()) {
+      alert('농장을 먼저 선택하세요.');
+      return false;
+    }
+  },
+  afterChange(changes, source) {
+    if (!changes || source === 'auto') return;
+    // 변경된 행 기록
+    changes.forEach(([rowIdx]) => changedRows.add(rowIdx));
+    const updates = [];
+
+    changes.forEach(([rowIdx, col, oldVal, newVal]) => {
+      if (oldVal === newVal) return;
+      const colIdx = typeof col === 'number' ? col : hot.propToCol(col);
+      const row    = hot.getDataAtRow(rowIdx);
+      const newRow = calcRow(row, colIdx);
+      newRow.forEach((val, c) => {
+        if (val !== row[c]) updates.push([rowIdx, c, val]);
+      });
+    });
+    if (updates.length > 0) hot.setDataAtCell(updates, 'auto');
+  },
+  beforeSelection(row, col) {
+    if (!farmSelected()) {
+      alert('농장을 먼저 선택하세요.');
+      return false;
+    }
+  },
+  licenseKey:            'non-commercial-and-evaluation',
+  height:                580,
+  width:                 '100%',
+  stretchH:              'all',
+  contextMenu:           true,
+  copyPaste:             true,
+  manualColumnResize:    true,
+  outsideClickDeselects: false,
+});
+
+// ── 농장 선택 시 데이터 로드 ──────────────
+document.getElementById('farm-select').addEventListener('change', () => {
+  const farmId = document.getElementById('farm-select').value;
+  if (!farmId) return;
+  cycleIdMap = {};
+  loadData(farmId, currentMode);
+});
+
+function addRows(n) {
+  hot.alter('insert_row_below', hot.countRows() - 1, n);
+}
+
+// ── 저장 ──────────────────────────────────
+async function saveAll() {
+  const farmId = document.getElementById('farm-select').value;
+  if (!farmId) { alert('농장을 선택해주세요.'); return; }
+
+  const data = hot.getData();
+  const rows = [];
+
+  data.forEach((r, rowIdx) => {
+    if (!r[0] || !r[1] || !r[4] || !r[3]) return;
+    
+    // 변경된 행 또는 신규 행(cycle_id 없는 행)만 저장
+    if (!changedRows.has(rowIdx) && cycleIdMap[rowIdx] !== undefined) return;
+
+    rows.push({
+      cycle_id:          cycleIdMap[rowIdx] || null,  // 수정이면 ID, 신규면 null
+      batch_no:          parseInt(r[0]),
+      crop_name:         String(r[1]),
+      seed_name:         String(r[2] || ''),
+      unit_alloc:        parseFloat(r[3]),
+      seeding_date:      String(r[4]),
+      transplant_qty:    r[5]  ? parseInt(r[5])  : null,
+      seeding_qty:       r[6]  ? parseInt(r[6])  : null,
+      seedling_boxes:    r[7]  ? parseInt(r[7])  : null,
+      transplant_date:   r[9]  ? String(r[9])    : null,
+      harvest_date:      r[11] ? String(r[11])   : null,
+      seeding_notice:    r[12] ? String(r[12])   : '',
+      transplant_notice: r[13] ? String(r[13])   : '',
+      harvest_notice:    r[14] ? String(r[14])   : '',
+    });
+  });
+
+  if (rows.length === 0) { alert('저장할 데이터가 없습니다.'); return; }
+
+  document.getElementById('save-status').textContent = '저장 중...';
+
+  const res = await fetch('/seeding/batch', {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body:    JSON.stringify({ farm_id: parseInt(farmId), rows }),
+  });
+
+  if (res.ok) {
+    const result = await res.json();
+    document.getElementById('save-status').textContent =
+      `저장 완료 — ${result.saved}건 저장됨`;
+    setTimeout(() => loadData(farmId, currentMode), 1000);
+  } else {
+    document.getElementById('save-status').textContent = '저장 실패';
+  }
+}
+</script>
+
+<style>
+.auto-cell   { background: #f5f5f5 !important; color: #888; }
+.notice-cell { background: #fffbf0 !important; }
+.loaded-row  { background: #f0f7f0 !important; }
+</style>
+
+{% endblock %}
