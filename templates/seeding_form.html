@@ -14,14 +14,12 @@
                 data-transplant-wd="{{ farm.transplant_weekday }}"
                 data-harvest-wd="{{ farm.harvest_weekday }}"
                 data-box-unit="{{ farm.seedling_box_unit }}">
-          {{ farm.farm_name }}
+          {{ farm.farm_code }}
         </option>
         {% endfor %}
       </select>
 
-      <!-- 조회 조건 -->
-      <div style="display:flex; gap:4px; background:#f0f0f0;
-                  border-radius:6px; padding:3px;">
+      <div style="display:flex; gap:4px; background:#f0f0f0; border-radius:6px; padding:3px;">
         <button id="btn-current" onclick="setMode('current')"
                 style="padding:5px 12px; border-radius:4px; border:none;
                        font-size:12px; cursor:pointer;
@@ -33,6 +31,9 @@
       </div>
 
       <button onclick="addRows(5)" class="btn btn-secondary" style="font-size:12px;">+ 5행 추가</button>
+      <button onclick="deleteChecked()"
+              style="padding:8px 18px; border-radius:6px; border:0.5px solid #c0392b;
+                     background:white; color:#c0392b; font-size:13px; cursor:pointer;">선택 삭제</button>
       <button onclick="saveAll()" class="btn btn-primary">저장</button>
     </div>
   </div>
@@ -50,16 +51,15 @@ const PORTS_PER_UNIT = 256;
 const PORTS_PER_BOX  = 176;
 const cropNames      = [...new Set(CROP_SPECS.map(s => s.crop_name))];
 
-// cycle_id 보관 (행 인덱스 → cycle_id)
-let cycleIdMap = {};
-let currentMode = 'current';
-let changedRows = new Set();  // 변경된 행 인덱스 추적
-
 // col index:
-// 0:차수 1:작목명 2:종자명 3:unit 4:파종예정일
-// 5:정식수량 6:파종수량 7:삽목상자
-// 8:육묘기간 9:정식예정일 10:재배기간 11:수확예정일
-// 12:파종알림 13:정식알림 14:수확알림
+// 0:체크박스 1:차수 2:작목명 3:종자명 4:unit 5:파종예정일
+// 6:정식수량 7:파종수량 8:삽목상자
+// 9:육묘기간 10:정식예정일 11:재배기간 12:수확예정일
+// 13:파종알림 14:정식알림 15:수확알림
+
+let cycleIdMap  = {};
+let currentMode = 'current';
+let changedRows = new Set();
 
 function getSpec(cropName) {
   return CROP_SPECS.find(s => s.crop_name === cropName) || null;
@@ -96,23 +96,23 @@ function adjustToWeekday(dateStr, targetWd) {
 
 function calcRow(row, changedCol) {
   const newRow      = [...row];
-  const cropName    = row[1];
-  const unitAlloc   = parseFloat(row[3]);
-  const seedingDate = String(row[4] || '');
+  const cropName    = row[2];
+  const unitAlloc   = parseFloat(row[4]);
+  const seedingDate = String(row[5] || '');
   const spec        = getSpec(cropName);
 
-  if (changedCol === 1) {
+  if (changedCol === 2) {
     if (spec) {
-      newRow[2]  = spec.seed_name;
-      newRow[8]  = spec.seedling_days;
-      newRow[10] = spec.growing_days;
+      newRow[3]  = spec.seed_name;
+      newRow[9]  = spec.seedling_days;
+      newRow[11] = spec.growing_days;
     }
-    [5, 6, 7, 9, 11].forEach(c => newRow[c] = '');
+    [6, 7, 8, 10, 12].forEach(c => newRow[c] = '');
   }
 
   if (!spec) return newRow;
 
-  if ((changedCol === 1 || changedCol === 3) && unitAlloc) {
+  if ((changedCol === 2 || changedCol === 4) && unitAlloc) {
     const { boxUnit } = getFarmOpts();
     const transplantQty = Math.floor(unitAlloc * PORTS_PER_UNIT);
     const rawSeeding    = Math.ceil(transplantQty * spec.seeding_ratio);
@@ -124,40 +124,51 @@ function calcRow(row, changedCol) {
       seedingQty    = rawSeeding;
       seedlingBoxes = Math.ceil(seedingQty / PORTS_PER_BOX);
     }
-    newRow[5] = transplantQty;
-    newRow[6] = seedingQty;
-    newRow[7] = seedlingBoxes;
+    newRow[6] = transplantQty;
+    newRow[7] = seedingQty;
+    newRow[8] = seedlingBoxes;
   }
 
-  if ((changedCol === 1 || changedCol === 4) && seedingDate) {
+  if ((changedCol === 2 || changedCol === 5) && seedingDate) {
     const { transplantWd, harvestWd } = getFarmOpts();
-    const seedlingDays  = newRow[8]  || spec.seedling_days;
-    const growingDays   = newRow[10] || spec.growing_days;
+    const seedlingDays  = newRow[9]  || spec.seedling_days;
+    const growingDays   = newRow[11] || spec.growing_days;
     const rawTransplant = addDays(seedingDate, seedlingDays);
     const transplantDate = adjustToWeekday(rawTransplant, transplantWd);
     const rawHarvest    = addDays(transplantDate, growingDays);
     const harvestDate   = adjustToWeekday(rawHarvest, harvestWd);
-    newRow[9]  = transplantDate;
-    newRow[11] = harvestDate;
+    newRow[10] = transplantDate;
+    newRow[12] = harvestDate;
   }
 
   return newRow;
 }
 
 function emptyRow() {
-  return ['', '', '', '', '', '', '', '', '', '', '', '', '', '', ''];
+  return [false, '', '', '', '', '', '', '', '', '', '', '', '', '', '', ''];
 }
 
 function rowToArray(r) {
   return [
-    r.batch_no, r.crop_name, r.seed_name, r.unit_alloc, r.seeding_date,
-    r.transplant_qty, r.seeding_qty, r.seedling_boxes,
-    r.seedling_days, r.transplant_date, r.growing_days, r.harvest_date,
-    r.seeding_notice, r.transplant_notice, r.harvest_notice,
+    false,              // 0 체크박스
+    r.batch_no,         // 1 차수
+    r.crop_name,        // 2 작목명
+    r.seed_name,        // 3 종자명
+    r.unit_alloc,       // 4 unit
+    r.seeding_date,     // 5 파종예정일
+    r.transplant_qty,   // 6 정식수량
+    r.seeding_qty,      // 7 파종수량
+    r.seedling_boxes,   // 8 삽목상자
+    r.seedling_days,    // 9 육묘기간
+    r.transplant_date,  // 10 정식예정일
+    r.growing_days,     // 11 재배기간
+    r.harvest_date,     // 12 수확예정일
+    r.seeding_notice,   // 13 파종알림
+    r.transplant_notice,// 14 정식알림
+    r.harvest_notice,   // 15 수확알림
   ];
 }
 
-// ── 조회 모드 전환 ─────────────────────────
 function setMode(mode) {
   currentMode = mode;
   document.getElementById('btn-current').style.background =
@@ -168,25 +179,21 @@ function setMode(mode) {
     mode === 'all' ? '#2C5F2D' : 'transparent';
   document.getElementById('btn-all').style.color =
     mode === 'all' ? 'white' : '#666';
-
   const farmId = document.getElementById('farm-select').value;
   if (farmId) loadData(farmId, mode);
 }
 
-// ── 데이터 로드 ───────────────────────────
 async function loadData(farmId, mode) {
   const res  = await fetch(`/seeding/load?farm_id=${farmId}&mode=${mode}`);
   const data = await res.json();
 
-  cycleIdMap = {};
-  changedRows = new Set();  // 로드 시 초기화
+  cycleIdMap  = {};
+  changedRows = new Set();
 
   const rows = data.rows.map((r, i) => {
-    cycleIdMap[i] = r.cycle_id;  // 행 인덱스 → cycle_id 매핑
+    cycleIdMap[i] = r.cycle_id;
     return rowToArray(r);
   });
-
-  // 빈 행 5개 추가 (신규 입력용)
   for (let i = 0; i < 5; i++) rows.push(emptyRow());
 
   hot.loadData(rows);
@@ -194,61 +201,63 @@ async function loadData(farmId, mode) {
     `${data.rows.length}건 불러옴`;
 }
 
-// ── Handsontable 초기화 ───────────────────
+// ── Handsontable ──────────────────────────
 const hot = new Handsontable(document.getElementById('grid'), {
   data: Array.from({ length: 20 }, emptyRow),
   rowHeaders:  true,
   colHeaders:  [
-    '차수', '작목명', '종자명', 'unit', '파종예정일',
+    '삭제', '차수', '작목명', '종자명', 'unit', '파종예정일',
     '정식수량', '파종수량', '삽목상자',
     '육묘기간', '정식예정일', '재배기간', '수확예정일',
     '파종알림', '정식알림', '수확알림'
   ],
   columns: [
-    { type: 'numeric' },
-    { type: 'dropdown', source: cropNames },
-    {},
-    { type: 'numeric' },
-    { type: 'date', dateFormat: 'YYYY-MM-DD', correctFormat: true },
-    { type: 'numeric' },
-    { type: 'numeric' },
-    { type: 'numeric' },
-    { type: 'numeric' },
-    { type: 'date', dateFormat: 'YYYY-MM-DD', correctFormat: true },
-    { type: 'numeric' },
-    { type: 'date', dateFormat: 'YYYY-MM-DD', correctFormat: true },
-    {},
-    {},
-    {},
+    { type: 'checkbox' },                                            // 0 체크박스
+    { type: 'numeric' },                                             // 1 차수
+    { type: 'dropdown', source: cropNames },                         // 2 작목명
+    {},                                                              // 3 종자명
+    { type: 'numeric' },                                             // 4 unit
+    { type: 'date', dateFormat: 'YYYY-MM-DD', correctFormat: true }, // 5 파종예정일
+    { type: 'numeric' },                                             // 6 정식수량
+    { type: 'numeric' },                                             // 7 파종수량
+    { type: 'numeric' },                                             // 8 삽목상자
+    { type: 'numeric' },                                             // 9 육묘기간
+    { type: 'date', dateFormat: 'YYYY-MM-DD', correctFormat: true }, // 10 정식예정일
+    { type: 'numeric' },                                             // 11 재배기간
+    { type: 'date', dateFormat: 'YYYY-MM-DD', correctFormat: true }, // 12 수확예정일
+    {},                                                              // 13 파종알림
+    {},                                                              // 14 정식알림
+    {},                                                              // 15 수확알림
   ],
   cells(row, col) {
-    if ([2, 5, 6, 7, 8, 10].includes(col)) {
+    if ([3, 6, 7, 8, 9, 11].includes(col)) {
       return { className: 'auto-cell' };
     }
-    if ([12, 13, 14].includes(col)) {
+    if ([13, 14, 15].includes(col)) {
       return { className: 'notice-cell' };
     }
-    // 불러온 행 (cycle_id 있는 행) 배경 구분
-    if (cycleIdMap[row] !== undefined) {
+    if (cycleIdMap[row] !== undefined && col !== 0) {
       return { className: 'loaded-row' };
     }
     return {};
   },
   beforeChange(changes) {
-    if (!farmSelected()) {
+    if (!changes) return;
+    // 체크박스 변경은 농장 선택 없어도 허용
+    const nonCheckbox = changes.filter(([, col]) => col !== 0);
+    if (nonCheckbox.length > 0 && !farmSelected()) {
       alert('농장을 먼저 선택하세요.');
       return false;
     }
   },
   afterChange(changes, source) {
     if (!changes || source === 'auto') return;
-    // 변경된 행 기록
     changes.forEach(([rowIdx]) => changedRows.add(rowIdx));
     const updates = [];
-
     changes.forEach(([rowIdx, col, oldVal, newVal]) => {
       if (oldVal === newVal) return;
       const colIdx = typeof col === 'number' ? col : hot.propToCol(col);
+      if (colIdx === 0) return; // 체크박스 변경은 자동계산 불필요
       const row    = hot.getDataAtRow(rowIdx);
       const newRow = calcRow(row, colIdx);
       newRow.forEach((val, c) => {
@@ -258,6 +267,7 @@ const hot = new Handsontable(document.getElementById('grid'), {
     if (updates.length > 0) hot.setDataAtCell(updates, 'auto');
   },
   beforeSelection(row, col) {
+    if (col === 0) return; // 체크박스 클릭은 항상 허용
     if (!farmSelected()) {
       alert('농장을 먼저 선택하세요.');
       return false;
@@ -273,16 +283,64 @@ const hot = new Handsontable(document.getElementById('grid'), {
   outsideClickDeselects: false,
 });
 
-// ── 농장 선택 시 데이터 로드 ──────────────
 document.getElementById('farm-select').addEventListener('change', () => {
   const farmId = document.getElementById('farm-select').value;
   if (!farmId) return;
-  cycleIdMap = {};
+  cycleIdMap  = {};
+  changedRows = new Set();
   loadData(farmId, currentMode);
 });
 
 function addRows(n) {
   hot.alter('insert_row_below', hot.countRows() - 1, n);
+}
+
+// ── 선택 삭제 ─────────────────────────────
+async function deleteChecked() {
+  const farmId = document.getElementById('farm-select').value;
+  if (!farmId) { alert('농장을 선택해주세요.'); return; }
+
+  const toDelete = [];     // DB 삭제 대상 cycle_id
+  const toRemove = [];     // 그리드에서 제거할 행 인덱스
+
+  for (let i = hot.countRows() - 1; i >= 0; i--) {
+    const checked = hot.getDataAtCell(i, 0);
+    if (!checked) continue;
+    toRemove.push(i);
+    if (cycleIdMap[i] !== undefined) {
+      toDelete.push(cycleIdMap[i]);
+    }
+  }
+
+  if (toRemove.length === 0) {
+    alert('삭제할 행을 체크해주세요.');
+    return;
+  }
+
+  if (!confirm(`${toRemove.length}개 행을 삭제하시겠습니까?`)) return;
+
+  // DB 삭제 요청
+  if (toDelete.length > 0) {
+    const res = await fetch('/seeding/delete', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ cycle_ids: toDelete }),
+    });
+    if (!res.ok) {
+      alert('삭제 실패');
+      return;
+    }
+  }
+
+  // 그리드에서 행 제거 (뒤에서부터 제거해야 인덱스 안 밀림)
+  toRemove.forEach(i => {
+    hot.alter('remove_row', i, 1);
+    // cycleIdMap 에서도 제거
+    delete cycleIdMap[i];
+  });
+
+  document.getElementById('save-status').textContent =
+    `${toRemove.length}개 행 삭제됨`;
 }
 
 // ── 저장 ──────────────────────────────────
@@ -294,26 +352,23 @@ async function saveAll() {
   const rows = [];
 
   data.forEach((r, rowIdx) => {
-    if (!r[0] || !r[1] || !r[4] || !r[3]) return;
-    
-    // 변경된 행 또는 신규 행(cycle_id 없는 행)만 저장
+    if (!r[1] || !r[2] || !r[5] || !r[4]) return;
     if (!changedRows.has(rowIdx) && cycleIdMap[rowIdx] !== undefined) return;
-
     rows.push({
-      cycle_id:          cycleIdMap[rowIdx] || null,  // 수정이면 ID, 신규면 null
-      batch_no:          parseInt(r[0]),
-      crop_name:         String(r[1]),
-      seed_name:         String(r[2] || ''),
-      unit_alloc:        parseFloat(r[3]),
-      seeding_date:      String(r[4]),
-      transplant_qty:    r[5]  ? parseInt(r[5])  : null,
-      seeding_qty:       r[6]  ? parseInt(r[6])  : null,
-      seedling_boxes:    r[7]  ? parseInt(r[7])  : null,
-      transplant_date:   r[9]  ? String(r[9])    : null,
-      harvest_date:      r[11] ? String(r[11])   : null,
-      seeding_notice:    r[12] ? String(r[12])   : '',
-      transplant_notice: r[13] ? String(r[13])   : '',
-      harvest_notice:    r[14] ? String(r[14])   : '',
+      cycle_id:          cycleIdMap[rowIdx] || null,
+      batch_no:          parseInt(r[1]),
+      crop_name:         String(r[2]),
+      seed_name:         String(r[3] || ''),
+      unit_alloc:        parseFloat(r[4]),
+      seeding_date:      String(r[5]),
+      transplant_qty:    r[6]  ? parseInt(r[6])  : null,
+      seeding_qty:       r[7]  ? parseInt(r[7])  : null,
+      seedling_boxes:    r[8]  ? parseInt(r[8])  : null,
+      transplant_date:   r[10] ? String(r[10])   : null,
+      harvest_date:      r[12] ? String(r[12])   : null,
+      seeding_notice:    r[13] ? String(r[13])   : '',
+      transplant_notice: r[14] ? String(r[14])   : '',
+      harvest_notice:    r[15] ? String(r[15])   : '',
     });
   });
 

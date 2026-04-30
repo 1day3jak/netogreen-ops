@@ -116,9 +116,8 @@ def save_batch(payload: BatchSaveRequest, db: Session = Depends(get_db)):
     saved = 0
 
     for row in payload.rows:
-
-        # ── cycle_id 있으면 기존 행 수정 ──────────
         if row.cycle_id:
+            # 기존 행 수정
             cycle = db.query(GrowCycle).filter(
                 GrowCycle.cycle_id == row.cycle_id
             ).first()
@@ -129,61 +128,81 @@ def save_batch(payload: BatchSaveRequest, db: Session = Depends(get_db)):
                 cycle.plan_transplant_qty = row.transplant_qty
                 cycle.plan_seeding_qty    = row.seeding_qty
                 cycle.plan_seedling_box   = row.seedling_boxes
+                cycle.actual_seeding_at   = row.seeding_date
+                cycle.actual_transplant_at = row.transplant_date
+                cycle.actual_harvest_at   = row.harvest_date
                 cycle.seeding_notice      = row.seeding_notice
                 cycle.transplant_notice   = row.transplant_notice
                 cycle.harvest_notice      = row.harvest_notice
                 cycle.updated_at          = datetime.now().isoformat()
-                # batch 날짜도 이 cycle 기준으로 업데이트
-                batch = cycle.batch
-                if row.seeding_date:
-                    batch.plan_seeding_at = row.seeding_date
-                if row.transplant_date:
-                    batch.plan_transplant_at = row.transplant_date
-                if row.harvest_date:
-                    batch.plan_harvest_at = row.harvest_date
-                batch.updated_at = datetime.now().isoformat()
                 saved += 1
             continue
 
-        # ── cycle_id 없으면 신규 생성 ─────────────
-        # 차수 존재 여부 확인
+        # 신규 행 — batch 있으면 재사용, 없으면 생성
         batch = db.query(GrowBatch).filter(
             GrowBatch.farm_id  == payload.farm_id,
             GrowBatch.batch_no == row.batch_no
         ).first()
 
         if not batch:
-            # 차수도 신규 생성
             batch = GrowBatch(
-                farm_id            = payload.farm_id,
-                batch_no           = row.batch_no,
-                plan_seeding_at    = row.seeding_date,
-                plan_transplant_at = row.transplant_date,
-                plan_harvest_at    = row.harvest_date,
-                status             = "planned",
-                created_at         = datetime.now().isoformat(),
-                updated_at         = datetime.now().isoformat(),
+                farm_id        = payload.farm_id,
+                batch_no       = row.batch_no,
+                plan_seeding_at = row.seeding_date,
+                status         = "planned",
+                created_at     = datetime.now().isoformat(),
+                updated_at     = datetime.now().isoformat(),
             )
             db.add(batch)
             db.flush()
 
         cycle = GrowCycle(
-            batch_id              = batch.batch_id,
-            farm_id               = payload.farm_id,
-            crop_name             = row.crop_name,
-            seed_name             = row.seed_name,
-            plan_unit_alloc       = row.unit_alloc,
-            plan_transplant_qty   = row.transplant_qty,
-            plan_seeding_qty      = row.seeding_qty,
-            plan_seedling_box     = row.seedling_boxes,
-            seeding_notice        = row.seeding_notice,
-            transplant_notice     = row.transplant_notice,
-            harvest_notice        = row.harvest_notice,
-            created_at            = datetime.now().isoformat(),
-            updated_at            = datetime.now().isoformat(),
+            batch_id               = batch.batch_id,
+            farm_id                = payload.farm_id,
+            crop_name              = row.crop_name,
+            seed_name              = row.seed_name,
+            plan_unit_alloc        = row.unit_alloc,
+            plan_transplant_qty    = row.transplant_qty,
+            plan_seeding_qty       = row.seeding_qty,
+            plan_seedling_box      = row.seedling_boxes,
+            actual_seeding_at      = row.seeding_date,
+            actual_transplant_at   = row.transplant_date,
+            actual_harvest_at      = row.harvest_date,
+            seeding_notice         = row.seeding_notice,
+            transplant_notice      = row.transplant_notice,
+            harvest_notice         = row.harvest_notice,
+            created_at             = datetime.now().isoformat(),
+            updated_at             = datetime.now().isoformat(),
         )
         db.add(cycle)
         saved += 1
 
     db.commit()
     return JSONResponse({"saved": saved})
+
+
+# ──삭제 API ──────────────────────────────────
+class DeleteRequest(BaseModel):
+    cycle_ids: List[int]
+
+@router.post("/delete")
+def delete_cycles(payload: DeleteRequest, db: Session = Depends(get_db)):
+    deleted = 0
+    for cycle_id in payload.cycle_ids:
+        cycle = db.query(GrowCycle).filter(
+            GrowCycle.cycle_id == cycle_id
+        ).first()
+        if cycle:
+            batch = cycle.batch
+            db.delete(cycle)
+            db.flush()
+            # 해당 차수에 더 이상 작목이 없으면 차수도 삭제
+            remaining = db.query(GrowCycle).filter(
+                GrowCycle.batch_id == batch.batch_id
+            ).count()
+            if remaining == 0:
+                db.delete(batch)
+            deleted += 1
+
+    db.commit()
+    return JSONResponse({"deleted": deleted})

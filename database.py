@@ -5,7 +5,8 @@ DATABASE_URL = "sqlite:///./netogreen.db"
 
 engine = create_engine(
     DATABASE_URL,
-    connect_args={"check_same_thread": False}
+    connect_args={"check_same_thread": False},
+    #echo=True  # SQL 쿼리 출력
 )
 
 SessionLocal = sessionmaker(bind=engine)

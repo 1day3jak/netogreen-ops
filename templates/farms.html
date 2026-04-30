@@ -1,0 +1,484 @@
+{% extends "base.html" %}
+{% block content %}
+
+<!-- 농장 목록 -->
+<div class="card">
+  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+    <span class="card-title" style="margin:0;">농장 관리</span>
+    <div style="display:flex; gap:8px;">
+      <button onclick="openModal()" class="btn btn-primary">+ 농장 추가</button>
+    </div>
+  </div>
+
+  <!-- 분류 탭 -->
+  <div style="display:flex; gap:4px; margin-bottom:16px;">
+    {% for label, val in [('전체','all'),('일반','general'),('클러스터','cluster'),('소싱','sourcing')] %}
+    <button onclick="filterType('{{ val }}')" id="tab-{{ val }}"
+            style="padding:6px 14px; border-radius:6px; font-size:12px; cursor:pointer;
+                   border:0.5px solid #ddd;
+                   background:{% if loop.first %}#2C5F2D{% else %}white{% endif %};
+                   color:{% if loop.first %}white{% else %}#666{% endif %};">
+      {{ label }}
+    </button>
+    {% endfor %}
+  </div>
+
+  <table id="farms-table">
+    <thead>
+      <tr>
+        <th>농장코드</th>
+        <th>농장명</th>
+        <th>농장주</th>
+        <th>분류</th>
+        <th>출하요일</th>
+        <th>총포트수</th>
+        <th>농장구조</th>
+        <th>상태</th>
+        <th>수정</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% set wd_names = ['월','화','수','목','금','토','일'] %}
+      {% for farm in farms %}
+      <tr data-type="{{ farm.farm_type }}"
+          style="{% if not farm.is_active %}opacity:0.4;{% endif %}">
+        <td>{{ farm.farm_code }}</td>
+        <td>{{ farm.current_owner.farm_name if farm.current_owner else '-' }}</td>
+        <td>{{ farm.current_owner.owner_name if farm.current_owner else '-' }}</td>
+        <td>
+          {% if farm.farm_type == 'general' %}일반
+          {% elif farm.farm_type == 'cluster' %}클러스터
+          {% else %}소싱{% endif %}
+        </td>
+        <td>
+          {% if farm.harvest_days %}
+            {% for d in farm.harvest_days.split(',') %}
+              {{ wd_names[d | int] }}
+            {% endfor %}
+          {% endif %}
+        </td>
+        <td>{{ farm.total_ports or '-' }}</td>
+        <td>{{ farm.farm_structure or '-' }}</td>
+        <td>
+          <button onclick="toggleFarm({{ farm.farm_id }}, this)"
+                  style="padding:4px 10px; border-radius:4px; font-size:12px; cursor:pointer;
+                         border:0.5px solid {% if farm.is_active %}#2C5F2D{% else %}#999{% endif %};
+                         background:white;
+                         color:{% if farm.is_active %}#2C5F2D{% else %}#999{% endif %};">
+            {{ '운영중' if farm.is_active else '비활성' }}
+          </button>
+        </td>
+        <td>
+          <button onclick='openModal(farmsData[{{ loop.index0 }}])'
+                  style="padding:4px 10px; border-radius:4px; font-size:12px;
+                         cursor:pointer; border:0.5px solid #ddd; background:white;">
+            수정
+          </button>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<!-- 농장 추가/수정 모달 -->
+<div id="modal-bg" style="display:none; position:fixed; inset:0;
+     background:rgba(0,0,0,0.4); z-index:100; align-items:center; justify-content:center;">
+  <div style="background:white; border-radius:12px; padding:28px 32px;
+              width:560px; max-height:90vh; overflow-y:auto;">
+
+    <div style="display:flex; justify-content:space-between; margin-bottom:20px;">
+      <span style="font-size:15px; font-weight:600;" id="modal-title">농장 추가</span>
+      <button onclick="closeModal()"
+              style="border:none; background:none; font-size:18px; cursor:pointer; color:#999;">✕</button>
+    </div>
+
+    <input type="hidden" id="edit-farm-id">
+
+    <!-- 농장 기본정보 -->
+    <div style="font-size:12px; font-weight:500; color:#2C5F2D;
+                margin-bottom:12px; padding-bottom:6px; border-bottom:1px solid #e0e0e0;">
+      농장 기본정보
+    </div>
+
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+      <div class="form-group">
+        <label>농장코드</label>
+        <input type="text" id="farm-code" placeholder="예: 파주1">
+      </div>
+      <div class="form-group">
+        <label>농장분류</label>
+        <select id="farm-type" onchange="onFarmTypeChange()">
+          <option value="general">일반</option>
+          <option value="cluster">클러스터</option>
+          <option value="sourcing">소싱</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="form-group" id="cluster-group" style="display:none;">
+      <label>클러스터 소속</label>
+      <select id="cluster-id">
+        <option value="">선택</option>
+        {% for cluster in clusters %}
+        <option value="{{ cluster.cluster_id }}">{{ cluster.cluster_name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <div class="form-group">
+      <label>농장주소</label>
+      <input type="text" id="address" placeholder="주소 입력">
+    </div>
+
+    <!-- 출하/정식/수확/파종 요일 -->
+    <div style="font-size:12px; font-weight:500; color:#2C5F2D;
+                margin:16px 0 12px; padding-bottom:6px; border-bottom:1px solid #e0e0e0;">
+      요일 설정
+    </div>
+
+    <div class="form-group">
+      <label>출하요일 (복수선택)</label>
+      <div style="display:flex; gap:6px; flex-wrap:wrap;">
+        {% for i, d in [(0,'월'),(1,'화'),(2,'수'),(3,'목'),(4,'금'),(5,'토'),(6,'일')] %}
+        <label style="display:flex; align-items:center; gap:4px; font-size:13px;
+                      cursor:pointer; padding:4px 10px; border-radius:6px;
+                      border:0.5px solid #ddd;">
+          <input type="checkbox" class="harvest-day-cb" value="{{ i }}">
+          {{ d }}
+        </label>
+        {% endfor %}
+      </div>
+    </div>
+
+    <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:12px;">
+      <div class="form-group">
+        <label>정식요일</label>
+        <select id="transplant-weekday">
+          {% for i, d in [(0,'월'),(1,'화'),(2,'수'),(3,'목'),(4,'금'),(5,'토'),(6,'일')] %}
+          <option value="{{ i }}">{{ d }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-group">
+        <label>수확요일</label>
+        <select id="harvest-weekday">
+          {% for i, d in [(0,'월'),(1,'화'),(2,'수'),(3,'목'),(4,'금'),(5,'토'),(6,'일')] %}
+          <option value="{{ i }}">{{ d }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-group">
+        <label>파종요일</label>
+        <select id="seeding-weekday">
+          {% for i, d in [(0,'월'),(1,'화'),(2,'수'),(3,'목'),(4,'금'),(5,'토'),(6,'일')] %}
+          <option value="{{ i }}">{{ d }}</option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+
+    <!-- 농장 규모 -->
+    <div style="font-size:12px; font-weight:500; color:#2C5F2D;
+                margin:16px 0 12px; padding-bottom:6px; border-bottom:1px solid #e0e0e0;">
+      농장 규모
+    </div>
+
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+      <div class="form-group">
+        <label>총 유닛수</label>
+        <input type="number" id="total-units" value="36" min="1"
+               oninput="calcTotalPorts()">
+      </div>
+      <div class="form-group">
+        <label>유닛당 포트수</label>
+        <input type="number" id="port-per-unit" value="256"
+               oninput="calcTotalPorts()">
+      </div>
+      <div class="form-group">
+        <label>총 포트수 <span style="font-size:11px; color:#999;">(자동계산, 수정가능)</span></label>
+        <input type="number" id="total-ports">
+      </div>
+      <div class="form-group">
+        <label>주간 처리 유닛</label>
+        <input type="number" id="units-per-week" value="7.5" step="0.5">
+      </div>
+    </div>
+
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+      <div class="form-group">
+        <label>농장구조 (유닛*단*반랙수)</label>
+        <input type="text" id="farm-structure" placeholder="예: 1*6*6">
+      </div>
+      <div class="form-group">
+        <label>삽목상자 씨앗수</label>
+        <input type="number" id="seedling-box-unit" value="176" min="1">
+      </div>
+    </div>
+
+    <!-- 현재 농장주 정보 -->
+    <div style="display:flex; justify-content:space-between; align-items:center;
+                margin:16px 0 12px; padding-bottom:6px; border-bottom:1px solid #e0e0e0;">
+      <span style="font-size:12px; font-weight:500; color:#2C5F2D;">현재 농장주 정보</span>
+      <button id="history-btn" onclick="showHistory()" style="display:none;
+              font-size:11px; color:#666; border:0.5px solid #ddd;
+              background:white; padding:3px 10px; border-radius:4px; cursor:pointer;">
+        변경이력 보기
+      </button>
+    </div>
+
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+      <div class="form-group">
+        <label>농장명</label>
+        <input type="text" id="farm-name" placeholder="예: 순수식물공장">
+      </div>
+      <div class="form-group">
+        <label>농장주명</label>
+        <input type="text" id="owner-name">
+      </div>
+      <div class="form-group">
+        <label>연락처</label>
+        <input type="text" id="owner-phone">
+      </div>
+      <div class="form-group">
+        <label>이메일</label>
+        <input type="email" id="owner-email">
+      </div>
+    </div>
+    <div class="form-group">
+      <label>시작일 <span style="font-size:11px; color:#999;">
+        (날짜가 바뀌면 새 농장주로 등록됩니다)</span></label>
+      <input type="date" id="owner-started-at">
+    </div>
+
+    <div style="display:flex; gap:8px; margin-top:16px;">
+      <button onclick="saveFarm()" class="btn btn-primary" style="flex:1; padding:10px;">저장</button>
+      <button onclick="closeModal()" class="btn btn-secondary" style="padding:10px 20px;">취소</button>
+    </div>
+  </div>
+</div>
+
+<!-- 변경이력 팝업 -->
+<div id="history-bg" style="display:none; position:fixed; inset:0;
+     background:rgba(0,0,0,0.5); z-index:200; align-items:center; justify-content:center;">
+  <div style="background:white; border-radius:12px; padding:24px 28px;
+              width:560px; max-height:80vh; overflow-y:auto;">
+    <div style="display:flex; justify-content:space-between; margin-bottom:16px;">
+      <span style="font-size:14px; font-weight:600;">농장주 변경이력</span>
+      <button onclick="closeHistory()"
+              style="border:none; background:none; font-size:18px; cursor:pointer; color:#999;">✕</button>
+    </div>
+    <table>
+      <thead>
+        <tr>
+          <th>농장명</th>
+          <th>농장주명</th>
+          <th>연락처</th>
+          <th>시작일</th>
+          <th>종료일</th>
+        </tr>
+      </thead>
+      <tbody id="history-tbody"></tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+
+const WD = ['월','화','수','목','금','토','일'];
+const farmsData = {{ farms_json | tojson }};
+
+// ── 분류 탭 필터 ──────────────────────────
+function filterType(type) {
+  // 탭 스타일
+  ['all','general','cluster','sourcing'].forEach(t => {
+    const btn = document.getElementById('tab-' + t);
+    btn.style.background = t === type ? '#2C5F2D' : 'white';
+    btn.style.color      = t === type ? 'white'   : '#666';
+  });
+  // 행 필터
+  document.querySelectorAll('#farms-table tbody tr').forEach(tr => {
+    tr.style.display =
+      (type === 'all' || tr.dataset.type === type) ? '' : 'none';
+  });
+}
+
+// ── 자동계산 ──────────────────────────────
+function calcTotalPorts() {
+  const units = parseInt(document.getElementById('total-units').value) || 0;
+  const ports = parseInt(document.getElementById('port-per-unit').value) || 0;
+  document.getElementById('total-ports').value = units * ports;
+}
+
+// ── 클러스터 선택 시 ──────────────────────
+function onFarmTypeChange() {
+  const type = document.getElementById('farm-type').value;
+  document.getElementById('cluster-group').style.display =
+    type === 'cluster' ? 'block' : 'none';
+}
+
+// ── 모달 열기 ─────────────────────────────
+function openModal(farm) {
+  document.getElementById('modal-bg').style.display = 'flex';
+
+  if (farm) {
+    document.getElementById('modal-title').textContent    = '농장 수정';
+    document.getElementById('edit-farm-id').value         = farm.farm_id;
+    document.getElementById('farm-code').value            = farm.farm_code;
+    document.getElementById('farm-type').value            = farm.farm_type;
+    document.getElementById('address').value              = farm.address || '';
+    document.getElementById('total-units').value          = farm.total_units;
+    document.getElementById('units-per-week').value       = farm.units_per_week;
+    document.getElementById('port-per-unit').value        = farm.port_per_unit;
+    document.getElementById('total-ports').value          = farm.total_ports || '';
+    document.getElementById('farm-structure').value       = farm.farm_structure || '';
+    document.getElementById('seedling-box-unit').value    = farm.seedling_box_unit;
+    document.getElementById('transplant-weekday').value   = farm.transplant_weekday;
+    document.getElementById('harvest-weekday').value      = farm.harvest_weekday;
+    document.getElementById('seeding-weekday').value      = farm.seeding_weekday;
+    document.getElementById('cluster-id').value           = farm.cluster_id || '';
+
+    // 출하요일 체크박스
+    document.querySelectorAll('.harvest-day-cb').forEach(cb => {
+      cb.checked = farm.harvest_days
+        ? farm.harvest_days.split(',').includes(cb.value)
+        : false;
+    });
+
+    onFarmTypeChange();
+
+    // 현재 농장주 정보 로드
+    loadCurrentOwner(farm.farm_id);
+    document.getElementById('history-btn').style.display = 'block';
+
+  } else {
+    document.getElementById('modal-title').textContent  = '농장 추가';
+    document.getElementById('edit-farm-id').value       = '';
+    document.getElementById('farm-code').value          = '';
+    document.getElementById('farm-type').value          = 'general';
+    document.getElementById('address').value            = '';
+    document.getElementById('total-units').value        = '36';
+    document.getElementById('units-per-week').value     = '7.5';
+    document.getElementById('port-per-unit').value      = '256';
+    document.getElementById('total-ports').value        = '9216';
+    document.getElementById('farm-structure').value     = '';
+    document.getElementById('seedling-box-unit').value  = '0';
+    document.getElementById('transplant-weekday').value = '0';
+    document.getElementById('harvest-weekday').value    = '2';
+    document.getElementById('seeding-weekday').value    = '1';
+    document.querySelectorAll('.harvest-day-cb').forEach(cb => cb.checked = false);
+    document.getElementById('farm-name').value          = '';
+    document.getElementById('owner-name').value         = '';
+    document.getElementById('owner-phone').value        = '';
+    document.getElementById('owner-email').value        = '';
+    document.getElementById('owner-started-at').value   = '';
+    document.getElementById('history-btn').style.display = 'none';
+    onFarmTypeChange();
+  }
+}
+
+function closeModal() {
+  document.getElementById('modal-bg').style.display = 'none';
+}
+
+// ── 현재 농장주 로드 ──────────────────────
+async function loadCurrentOwner(farmId) {
+  const res  = await fetch(`/farms/owners/${farmId}`);
+  const data = await res.json();
+  if (data.owners.length > 0) {
+    const o = data.owners[0];
+    document.getElementById('farm-name').value        = o.farm_name;
+    document.getElementById('owner-name').value       = o.owner_name;
+    document.getElementById('owner-phone').value      = o.phone;
+    document.getElementById('owner-email').value      = o.email;
+    document.getElementById('owner-started-at').value = o.started_at;
+  }
+}
+
+// ── 변경이력 팝업 ─────────────────────────
+async function showHistory() {
+  const farmId = document.getElementById('edit-farm-id').value;
+  const res    = await fetch(`/farms/owners/${farmId}`);
+  const data   = await res.json();
+
+  const tbody = document.getElementById('history-tbody');
+  tbody.innerHTML = data.owners.map(o => `
+    <tr>
+      <td>${o.farm_name}</td>
+      <td>${o.owner_name}</td>
+      <td>${o.phone}</td>
+      <td>${o.started_at}</td>
+      <td>${o.ended_at}</td>
+    </tr>
+  `).join('');
+
+  document.getElementById('history-bg').style.display = 'flex';
+}
+
+function closeHistory() {
+  document.getElementById('history-bg').style.display = 'none';
+}
+
+// ── 저장 ──────────────────────────────────
+async function saveFarm() {
+  const farmId = document.getElementById('edit-farm-id').value;
+
+  const harvestDays = Array.from(
+    document.querySelectorAll('.harvest-day-cb:checked')
+  ).map(cb => cb.value).join(',');
+
+  const payload = {
+    farm_id:            farmId ? parseInt(farmId) : null,
+    farm_code:          document.getElementById('farm-code').value,
+    farm_type:          document.getElementById('farm-type').value,
+    cluster_id:         document.getElementById('cluster-id').value
+                          ? parseInt(document.getElementById('cluster-id').value)
+                          : null,
+    address:            document.getElementById('address').value,
+    harvest_days:       harvestDays,
+    transplant_weekday: parseInt(document.getElementById('transplant-weekday').value) || 0,
+    harvest_weekday:    parseInt(document.getElementById('harvest-weekday').value) || 0,
+    seeding_weekday:    parseInt(document.getElementById('seeding-weekday').value) || 0,
+    total_units:        parseInt(document.getElementById('total-units').value) || 0,
+    units_per_week:     parseFloat(document.getElementById('units-per-week').value) || 0,
+    port_per_unit:      parseInt(document.getElementById('port-per-unit').value) || 256,
+    total_ports:        parseInt(document.getElementById('total-ports').value) || null,
+    farm_structure:     document.getElementById('farm-structure').value,
+    seedling_box_unit:  parseInt(document.getElementById('seedling-box-unit').value) || 0,
+    farm_name:          document.getElementById('farm-name').value,
+    owner_name:         document.getElementById('owner-name').value,
+    phone:              document.getElementById('owner-phone').value,
+    email:              document.getElementById('owner-email').value,
+    started_at:         document.getElementById('owner-started-at').value,
+  };
+
+  const res = await fetch('/farms/save', {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body:    JSON.stringify(payload),
+  });
+
+  if (res.ok) {
+    closeModal();
+    location.reload();
+  } else {
+    alert('저장 실패');
+  }
+}
+
+// ── 활성/비활성 토글 ──────────────────────
+async function toggleFarm(farmId) {
+  const res = await fetch(`/farms/toggle/${farmId}`, { method: 'POST' });
+  if (res.ok) location.reload();
+}
+
+// 모달 바깥 클릭 시 닫기
+document.getElementById('modal-bg').addEventListener('click', e => {
+  if (e.target === document.getElementById('modal-bg')) closeModal();
+});
+document.getElementById('history-bg').addEventListener('click', e => {
+  if (e.target === document.getElementById('history-bg')) closeHistory();
+});
+</script>
+
+{% endblock %}

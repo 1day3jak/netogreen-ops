@@ -9,22 +9,11 @@ PORTS_PER_SEEDLING_BOX = 176  # 삽목상자당 포트수
 # 수량 계산
 # ──────────────────────────────────────────
 def calc_quantities(unit_alloc: float, seeding_ratio: float,
-                    seedling_box_unit: bool = False) -> dict:
-    """
-    유닛배분 → 정식/파종/삽목상자 수량 자동계산
-
-    seedling_box_unit=False : 일반농장 (씨앗 단위 최소화)
-    seedling_box_unit=True  : 클러스터 (삽목상자 단위 역산)
-    """
+                    ports_per_box: int = 176) -> dict:
     transplant_qty = int(unit_alloc * PORTS_PER_UNIT)
     raw_seeding    = math.ceil(transplant_qty * seeding_ratio)
-
-    if seedling_box_unit:
-        seedling_boxes = math.ceil(raw_seeding / PORTS_PER_SEEDLING_BOX)
-        seeding_qty    = seedling_boxes * PORTS_PER_SEEDLING_BOX
-    else:
-        seeding_qty    = raw_seeding
-        seedling_boxes = math.ceil(seeding_qty / PORTS_PER_SEEDLING_BOX)
+    seeding_qty    = raw_seeding
+    seedling_boxes = math.ceil(seeding_qty / ports_per_box)
 
     return {
         "plan_transplant_qty": transplant_qty,
@@ -138,7 +127,7 @@ def calc_all(db, farm_id: int, crop_name: str, seed_name: str,
         return None
 
     quantities = calc_quantities(
-        unit_alloc, spec["seeding_ratio"], seedling_box_unit
+        unit_alloc, spec["seeding_ratio"], farm.seedling_box_unit
     )
     transplant_date = calc_transplant_date(
         seeding_date, spec["seedling_days"], farm.transplant_weekday

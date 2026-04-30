@@ -48,28 +48,30 @@ class Farm(Base):
     __tablename__ = "farms"
 
     farm_id            = Column(Integer, primary_key=True, autoincrement=True)
-    farm_name          = Column(String(100), nullable=False, unique=True)
+    farm_code          = Column(String(100), nullable=False, unique=True)  # 파주1
+    farm_type          = Column(String(20), nullable=False, default='general')
+    # 'general' | 'cluster' | 'sourcing'
     cluster_id         = Column(Integer, ForeignKey("clusters.cluster_id"))
-    # NULL = 개인농장 / 값 있으면 클러스터 소속
 
-    # 출하 스케줄
-    harvest_schedule   = Column(String(20), nullable=False)
-    # 'mon_tue' → 정식:목, 파종:금, 수확:월화
-    # 'wed_thu' → 정식:월, 파종:화, 수확:수목
-    seeding_weekday    = Column(Integer, nullable=False)    # 0=월 ~ 6=일
-    transplant_weekday = Column(Integer, nullable=False)
-    harvest_weekday    = Column(Integer, nullable=False)
+    # 주소
+    address            = Column(String(200))
 
-    # 농장 규격
+    # 출하/정식/수확/파종 요일
+    harvest_days       = Column(String(20))   # "0,1" (월,화) 복수선택
+    transplant_weekday = Column(Integer)      # 0=월~6=일
+    harvest_weekday    = Column(Integer)
+    seeding_weekday    = Column(Integer)
+
+    # 농장 규모
     total_units        = Column(Integer, default=36)
     units_per_week     = Column(Float,   default=7.5)
     port_per_unit      = Column(Integer, default=256)
-    seedling_box_unit  = Column(Integer, default=0)
-    # 0 = 일반농장 (씨앗 단위 최소화)
-    # 1 = 클러스터 (삽목상자 단위 역산)
+    total_ports        = Column(Integer)      # 직접 입력 (자동계산 후 수정 가능)
+    farm_structure     = Column(String(50))   # '6*6*2'
+    seedling_box_unit  = Column(Integer, default=176)
 
-    is_active  = Column(Integer, default=1)
-    created_at = Column(String(30))
+    is_active          = Column(Integer, default=1)
+    created_at         = Column(String(30))
 
     # 관계
     cluster  = relationship("Cluster", back_populates="farms")
@@ -77,8 +79,32 @@ class Farm(Base):
     batches  = relationship("GrowBatch", back_populates="farm")
     cycles   = relationship("GrowCycle", back_populates="farm")
     crop_specs = relationship("FarmCropSpec", back_populates="farm")
+    owners   = relationship("FarmOwner", back_populates="farm",
+                            order_by="FarmOwner.started_at.desc()")
+
+    @property
+    def current_owner(self):
+        """현재 농장주 (최신 1건)"""
+        return self.owners[0] if self.owners else None
 
 
+# ──────────────────────────────────────────
+# 3-1. 농장주변경이력 — 시작일, 종료일 관리
+# ──────────────────────────────────────────
+class FarmOwner(Base):
+    __tablename__ = "farm_owners"
+
+    owner_id   = Column(Integer, primary_key=True, autoincrement=True)
+    farm_id    = Column(Integer, ForeignKey("farms.farm_id"), nullable=False)
+    farm_name  = Column(String(100))
+    owner_name = Column(String(100))
+    phone      = Column(String(50))
+    email      = Column(String(100))
+    started_at = Column(String(10), nullable=False)
+    ended_at   = Column(String(10))
+    created_at = Column(String(30))
+
+    farm = relationship("Farm", back_populates="owners")
 
 # ──────────────────────────────────────────
 # 4. 랙 구조 — 구역 / 랙 / 단
@@ -138,9 +164,7 @@ class GrowBatch(Base):
     batch_id           = Column(Integer, primary_key=True, autoincrement=True)
     farm_id            = Column(Integer, ForeignKey("farms.farm_id"), nullable=False)
     batch_no           = Column(Integer, nullable=False)   # 1차, 2차...
-    plan_seeding_at    = Column(String(10), nullable=False) # 파종 예정일
-    plan_transplant_at = Column(String(10))                 # 정식 예정일 (자동계산)
-    plan_harvest_at    = Column(String(10))                 # 수확 예정일 (자동계산)
+    plan_seeding_at    = Column(String(10)) # 파종 예정일
     status             = Column(String(20), default="planned")
     # planned | seeded | transplanted | harvesting | done
     created_at = Column(String(30))

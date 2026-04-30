@@ -8,9 +8,10 @@ Base.metadata.create_all(bind=engine)
 app = FastAPI(title="네토그린 운영 시스템")
 templates = Jinja2Templates(directory="templates")
 
-from routers import seeding, overview
+from routers import seeding, overview, farms
 app.include_router(seeding.router)
 app.include_router(overview.router)
+app.include_router(farms.router)
 
 @app.get("/")
 def root():
